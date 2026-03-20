@@ -1,2 +1,2 @@
-tempfiles/*
+temp_files/*
 !tempfiles/.gitkeep
