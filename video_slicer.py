@@ -27,7 +27,7 @@ def torch_load_without_weights_only():
 
 
 # Extract Audio from video
-def extract_audio_from_video(video_path: str, audio_path: str = "temp_audio.wav"):
+def extract_audio_from_video(video_path: str, audio_path: str):
     video = VideoFileClip(video_path)
     try:
         video.audio.write_audiofile(audio_path, codec="pcm_s16le", fps=16000)
@@ -43,7 +43,7 @@ def transcribe_with_whisperx(
     model_name: str = "large-v3",
     device: str = "cpu",
     compute_type: str = "int8",
-    batch_size: int = 4,
+    batch_size: int = 4
 ):
 
     with torch_load_without_weights_only():
