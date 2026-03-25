@@ -86,7 +86,7 @@ def transcribe_with_whisperx(
     del model_a
     gc.collect()
 
-    return word_segments
+    return word_segments 
 
 
 # Convert text to srt
