@@ -1,0 +1,4 @@
+customtkinter>=5.2.0
+moviepy>=1.0.3
+torch
+whisperx>=3.7.6

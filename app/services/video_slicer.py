@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import gc
 import json
 import os
@@ -34,6 +32,8 @@ def torch_load_without_weights_only():
 
 # Extract Audio from video
 def extract_audio_from_video(video_path: str, audio_path: str):
+    # Достаём аудио из видео в wav (для whisperx)
+    os.makedirs(os.path.dirname(audio_path) or ".", exist_ok=True)
     video = VideoFileClip(video_path)
     try:
         video.audio.write_audiofile(audio_path, codec="pcm_s16le", fps=16000)
@@ -51,6 +51,7 @@ def transcribe_with_whisperx(
     compute_type: str = "int8",
     batch_size: int = 4
 ):
+    # Транскрипция + выравнивание по словам (whisperx)
 
     with torch_load_without_weights_only():
         model = whisperx.load_model(
@@ -112,15 +113,34 @@ def segments_to_srt(segments, srt_path: str):
             f.write(f"{i}\n{start} --> {end}\n{seg['text'].strip()}\n\n")
 
 
+# Расположение субтитров на видео
+def _subs_vertical_anchor(subs_position: str, video_height: int):
+    # Доля высоты кадра: где держать строку (по вертикали, по центру по горизонтали)
+    if subs_position == "Сверху":
+        frac = 0.12
+    elif subs_position == "По середине":
+        frac = 0.5
+    else:
+        # "Снизу" и всё неизвестное — как раньше, у нижней кромки
+        frac = 0.8
+    y = video_height * frac
+    return ("center", y)
+
+
 # Insert subs into video
 def burn_subtitles_into_video(
-    video_path: str, segments, output_path: str, preset_name: str
+    video_path: str,
+    segments,
+    output_path: str,
+    preset_name: str,
+    subs_position: str = "Снизу",
 ):
-
+    # Накладываем субтитры на видео (moviepy)
     video = VideoFileClip(video_path)
     target_fps = video.fps if video.fps else 24.0
 
     txt_clips = []
+    pos = _subs_vertical_anchor(subs_position, video.h)
 
     preset_config = get_subs_preset(preset_name, video)
     for seg in segments:
@@ -131,7 +151,6 @@ def burn_subtitles_into_video(
 
         start = seg["start"]
         duration = seg["end"] - seg["start"]
-        pos = ("center", video.h * 0.8)
 
         # shadow
         shadow_params = subs_params.copy()
@@ -152,7 +171,7 @@ def burn_subtitles_into_video(
 
         txt_clip = (
             TextClip(**subs_params)
-            .with_position(("center", video.h * 0.8))
+            .with_position(pos)
             .with_start(seg["start"])
             .with_duration(seg["end"] - seg["start"])
         )
@@ -179,6 +198,7 @@ def burn_subtitles_into_video(
 
 
 def _probe_duration_seconds(video_path: str) -> float:
+    # Берём длительность видео через ffprobe (нужно для нарезки)
     proc = subprocess.run(
         [
             "ffprobe",
@@ -209,10 +229,8 @@ def split_video_ffmpeg(
     filename_prefix: str = "part",
     reencode: bool = False,
 ) -> list[str]:
-    """
-    Split video into `parts` equal pieces (last piece takes remainder).
-    If reencode=False uses stream copy (fast, but cut points depend on keyframes).
-    """
+    # Режем на parts кусков через ffmpeg.
+    # reencode=False = быстро, но резка зависит от keyframe'ов.
     if parts < 2:
         raise ValueError("parts must be >= 2")
 
@@ -227,6 +245,7 @@ def split_video_ffmpeg(
         start = piece * i
         seg_dur = piece if i < parts - 1 else max(0.0, duration - start)
 
+        # Имя куска: "<prefix>_01.mp4", "<prefix>_02.mp4" и т.д.
         out_path = out_dir / f"{filename_prefix}_{i+1:02}.mp4"
         cmd = [
             "ffmpeg",
