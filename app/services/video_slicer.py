@@ -46,7 +46,7 @@ def extract_audio_from_video(video_path: str, audio_path: str):
 def transcribe_with_whisperx(
     audio_path: str,
     language: str = "ru",
-    model_name: str = "large-v3",
+    model_name: str = "small",
     device: str = "cpu",
     compute_type: str = "int8",
     batch_size: int = 4
@@ -81,36 +81,39 @@ def transcribe_with_whisperx(
 
     word_segments = []
 
+    temp_words = []
+
     for seg in result["segments"]:
         for w in seg["words"]:
+
             if w["start"] is None or w["end"] is None:
                 continue
 
-            word_segments.append(
-                {"start": w["start"], "end": w["end"], "text": w["word"]}
-            )
+            temp_words.append(w)
+
+            # Когда накопилось 3 слова
+            if len(temp_words) == 3:
+
+                word_segments.append({
+                    "start": temp_words[0]["start"],
+                    "end": temp_words[-1]["end"],
+                    "text": " ".join(word["word"] for word in temp_words)
+                })
+
+                temp_words = []
+
+    # Если осталось последнее слово
+    if temp_words:
+        word_segments.append({
+            "start": temp_words[0]["start"],
+            "end": temp_words[-1]["end"],
+            "text": " ".join(word["word"] for word in temp_words)
+        })
 
     del model_a
     gc.collect()
 
-    return word_segments 
-
-
-# Convert text to srt
-def segments_to_srt(segments, srt_path: str):
-    def format_time(seconds: float) -> str:
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = seconds % 60
-        ms = int((s - int(s)) * 1000)
-        s = int(s)
-        return f"{h:02}:{m:02}:{s:02},{ms:03}"
-
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(segments, 1):
-            start = format_time(seg["start"])
-            end = format_time(seg["end"])
-            f.write(f"{i}\n{start} --> {end}\n{seg['text'].strip()}\n\n")
+    return word_segments
 
 
 # Расположение субтитров на видео
@@ -230,7 +233,7 @@ def split_video_ffmpeg(
     reencode: bool = False,
 ) -> list[str]:
     # Режем на parts кусков через ffmpeg.
-    # reencode=False = быстро, но резка зависит от keyframe'ов.
+    # reencode=False = быстро
     if parts < 2:
         raise ValueError("parts must be >= 2")
 
