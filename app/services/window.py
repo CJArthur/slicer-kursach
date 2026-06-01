@@ -2,8 +2,49 @@ import threading
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+from pathlib import Path
+from db.database import get_history
 
+# Окно истории
+def open_history_window(root):
+    win = ctk.CTkToplevel(root)
+    win.title("История обработок")
+    win.geometry("730x640")
+    win.grab_set()
 
+    rows = get_history()
+
+    if not rows:
+        ctk.CTkLabel(win, text = "История пуста").pack(pady = 20)
+        return
+    
+    # Добавляем скролл линию для удобства просмотра
+    frame = ctk.CTkScrollableFrame(win, orientation="horizontal")
+    frame.pack(fill="both", expand=True)
+
+    # Имена столбцов
+    headers = ["Дата", "Исходник", "Результат", "Пресет", "Частей", "Статус"]
+    for col, h in enumerate(headers):
+        ctk.CTkLabel(frame, text=h, font=("Arial", 12, "bold")).grid(
+            row=0, column=col, padx=8, pady=6, sticky="w")
+
+    for row_idx, row in enumerate(rows, start=1):
+        values = [
+            row["created_at"],
+            Path(row["source"]),
+            Path(row["output"]),
+            row["preset"] or "—",
+            str(row["parts"]) if row["parts"] else "—",
+            row["status"],
+        ]
+        for col, val in enumerate(values):
+            color = "green" if row["status"] == "success" else "red"
+            ctk.CTkLabel(
+                frame, text=val,
+                text_color=color if col == 5 else None
+            ).grid(row=row_idx, column=col, padx=8, pady=3, sticky="w")
+
+# Главное окно
 def create_app(presets, subs_positions, start_processing):
     ctk.set_appearance_mode("Dark")
     ctk.set_default_color_theme("blue")
@@ -21,22 +62,22 @@ def create_app(presets, subs_positions, start_processing):
 
         root.after(0, _write)
 
+    # Выбор входного видео
     def choose_input():
-        # Выбор входного видео
         path = filedialog.askopenfilename(filetypes=[("Video", "*.mp4 *.mov *.avi")])
         if path:
             entry_input.delete(0, "end")
             entry_input.insert(0, path)
 
+    # Выбор папки, куда сохраняем результат
     def choose_output_folder():
-        # Выбор папки, куда сохраняем результат
         folder = filedialog.askdirectory(title="Выберите папку для сохранения")
         if folder:
             entry_output.delete(0, "end")
             entry_output.insert(0, folder)
 
+    # Если галочка выключена — блокируем и затемняем поле
     def toggle_split():
-        # Если галочка выключена — блокируем и затемняем поле
         if split_var.get():
             video_count.configure(state="normal")
             video_count.configure(fg_color = "#000000")
@@ -44,17 +85,19 @@ def create_app(presets, subs_positions, start_processing):
             video_count.configure(state="disabled")
             video_count.configure(fg_color="#535353")
 
+     # Собираем значения из UI
     def on_start_click():
-        # Собираем значения из UI
         input_video = entry_input.get().strip()
         output_folder = entry_output.get().strip()
         preset_name = combo_presets.get().strip()
         subs_position = combo_subs_pos.get().strip()
 
+        # Обработка исключения
         if not input_video or not output_folder:
             messagebox.showerror("Ошибка", "Выберите вход и выход!")
             return
 
+        # Проверка флажка "Нарезать на части"
         split_enabled = bool(split_var.get())
         split_parts = None
         if split_enabled:
@@ -93,6 +136,7 @@ def create_app(presets, subs_positions, start_processing):
                 root.after(0, lambda: btn_start.configure(state="normal"))
 
         threading.Thread(target=worker, daemon=True).start()
+
 
     # --- Настройки окна --- #
 
@@ -141,6 +185,11 @@ def create_app(presets, subs_positions, start_processing):
     # Поле кнопки запуска
     btn_start = ctk.CTkButton(root, text="ЗАПУСТИТЬ", command=on_start_click, height=40, fg_color="green")
     btn_start.grid(row=7, column=1, pady=25)
+
+    # Поле кнопки истории
+    btn_history = ctk.CTkButton(root, text = "История", height = 30,
+                                command = lambda: open_history_window(root)) 
+    btn_history.grid(row = 2, column = 2, pady = 25)
 
     # Поле настройки окна с логами
     log_box = ctk.CTkTextbox(root, width=680, height=150)
