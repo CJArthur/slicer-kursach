@@ -8,6 +8,7 @@ from services.video_slicer import (
     transcribe_with_whisperx,
 )
 from services.window import create_app
+from db.database import init_db, save_record
 
 
 PRESETS = [
@@ -43,41 +44,58 @@ def start_processing(state, log):
     # Временный wav для whisperx
     audio_path = str(Path("temp_files") / f"{base_name}_extr_audio.wav")
 
-    log("Загружается видео (извлекаем аудио)...")
-    audio_file = extract_audio_from_video(input_video, audio_path)
+    try:
+        log("Загружается видео (извлекаем аудио)...")
+        audio_file = extract_audio_from_video(input_video, audio_path)
 
-    log("Переходим к транскрибации...")
-    segments = transcribe_with_whisperx(
-        audio_file,
-        language="ru",
-        model_name="large-v3",
-        device="cpu",
-        compute_type="int8",
-        batch_size=4,
-    )
-
-    log("Накладываем субтитры...")
-    burn_subtitles_into_video(
-        input_video, segments, output_video, preset_name, subs_position=subs_position
-    )
-
-    # Если включена галочка, то режем уже готовое видео с субтитрами
-    if state["split_enabled"] and state["split_parts"]:
-        # Папка для кусочков: "<выходная папка>/<base_name>_parts"
-        parts_dir = out_dir / f"{base_name}_parts"
-        log(f"Нарезаем на {state['split_parts']} частей (ffmpeg)...")
-        split_video_ffmpeg(
-            input_video=output_video,
-            output_dir=str(parts_dir),
-            parts=state["split_parts"],
-            filename_prefix=base_name,
-            reencode=False,
+        log("Переходим к транскрибации...")
+        segments = transcribe_with_whisperx(
+            audio_file,
+            language="ru",
+            model_name="small",
+            device="cpu",
+            compute_type="int8",
+            batch_size=4,
         )
 
-    log("Готово!")
+        log("Накладываем субтитры...")
+        burn_subtitles_into_video(
+            input_video, segments, output_video, preset_name, subs_position=subs_position
+        )
 
+        parts = None
+        # Если включена галочка, то режем уже готовое видео с субтитрами
+        if state["split_enabled"] and state["split_parts"]:
+            # Папка для кусочков: "<выходная папка>/<base_name>_parts"
+            parts_dir = out_dir / f"{base_name}_parts"
+            log(f"Нарезаем на {state['split_parts']} частей (ffmpeg)...")
+            split_video_ffmpeg(
+                input_video=output_video,
+                output_dir=str(parts_dir),
+                parts=state["split_parts"],
+                filename_prefix=base_name,
+                reencode=False,
+            )
+            parts = state["split_parts"]
+
+        log("Фиксируем в базе данных")
+        save_record(source = input_video, output = output_video,
+                    preset = preset_name, position = subs_position,
+                    parts = parts, status = "success")
+        
+        log("Готово!")
+
+    except Exception as e:
+        # Ошибка — тоже пишем, чтобы история была полной
+        save_record(
+            source=input_video, output=output_video,
+            preset=preset_name, position=subs_position,
+            parts=state.get("split_parts"), status="error", error_msg=str(e)
+        )
+        raise  # пробрасываем дальше, чтобы window.py показал messagebox
 
 def main() -> None:
+    init_db()
     # UI создаётся отдельно, а обработка живёт в start_processing()
     root = create_app(PRESETS, SUBS_POSITION, start_processing)
     root.mainloop()
